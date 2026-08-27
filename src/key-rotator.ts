@@ -1,4 +1,3 @@
-import { TokenBucket } from './token-bucket'
 import { KeyConfig, KeyState, ProviderConfig, ProviderState } from './types'
 import { getProviderBucket } from './config'
 
@@ -9,14 +8,15 @@ export class KeyRotator {
 
   addProvider(name: string, config: ProviderConfig): void {
     const bucketConfig = getProviderBucket(config)
-    const keys: KeyState[] = config.keys.map((k) => ({
+    const keys: KeyState[] = (config.keys as KeyConfig[]).map((k) => ({
       key: k.key,
       name: k.name || k.key.slice(-4),
       tokens: bucketConfig.size,
       lastRefill: Date.now(),
       requestCount: 0,
       error429Count: 0,
-      lastUsed: 0
+      lastUsed: 0,
+      cooldownUntil: 0
     }))
 
     this.providers.set(name, {
@@ -51,12 +51,13 @@ export class KeyRotator {
     }
   }
 
-  mark429(providerName: string, key: string): void {
+  mark429(providerName: string, key: string, cooldownMs: number = 0): void {
     const state = this.providers.get(providerName)
     if (!state) return
     const keyState = state.keys.find((k) => k.key === key)
     if (keyState) {
       keyState.error429Count++
+      keyState.cooldownUntil = Date.now() + cooldownMs
     }
   }
 
@@ -70,20 +71,33 @@ export class KeyRotator {
     return Array.from(this.providers.keys())
   }
 
-  private roundRobin(state: ProviderState): KeyState {
-    const key = state.keys[state.currentIndex]
-    state.currentIndex = (state.currentIndex + 1) % state.keys.length
-    return key
+  private roundRobin(state: ProviderState): KeyState | null {
+    const n = state.keys.length
+    const now = Date.now()
+    for (let i = 0; i < n; i++) {
+      const key = state.keys[state.currentIndex]
+      state.currentIndex = (state.currentIndex + 1) % n
+      if (key.cooldownUntil <= now) return key
+    }
+    return null
   }
 
-  private leastUsed(state: ProviderState): KeyState {
-    return state.keys.reduce((min, curr) =>
-      curr.requestCount < min.requestCount ? curr : min
-    )
+  private leastUsed(state: ProviderState): KeyState | null {
+    const now = Date.now()
+    let best: KeyState | null = null
+    for (const key of state.keys) {
+      if (key.cooldownUntil > now) continue
+      if (!best || key.requestCount < best.requestCount) {
+        best = key
+      }
+    }
+    return best
   }
 
-  private random(state: ProviderState): KeyState {
-    const index = Math.floor(Math.random() * state.keys.length)
-    return state.keys[index]
+  private random(state: ProviderState): KeyState | null {
+    const now = Date.now()
+    const available = state.keys.filter((k) => k.cooldownUntil <= now)
+    if (available.length === 0) return null
+    return available[Math.floor(Math.random() * available.length)]
   }
 }

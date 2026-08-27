@@ -48,6 +48,7 @@ export interface KeyState {
   requestCount: number
   error429Count: number
   lastUsed: number
+  cooldownUntil: number
 }
 
 export interface ProviderState {

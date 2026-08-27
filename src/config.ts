@@ -1,6 +1,8 @@
 import { PluginConfig, ProviderConfig, BucketConfig, KeyConfig } from './types'
-import { join } from 'path'
+import { join, dirname } from 'path'
 import { homedir } from 'os'
+import { readFile } from 'fs/promises'
+import { mkdirSync, writeFileSync } from 'fs'
 
 const DEFAULT_BACKOFF = {
   enabled: true,
@@ -31,6 +33,62 @@ function normalizeKey(key: string | KeyConfig): KeyConfig {
     return { key, name: key.slice(-4) }
   }
   return { ...key, name: key.name ?? key.key.slice(-4) }
+}
+
+function stripJsonComments(text: string): string {
+  let result = ''
+  let inString = false
+  let inBlockComment = false
+  let inLineComment = false
+  let escaped = false
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]
+    const next = text[i + 1]
+
+    if (inLineComment) {
+      if (ch === '\n') {
+        inLineComment = false
+        result += ch
+      }
+      continue
+    }
+
+    if (inBlockComment) {
+      if (ch === '*' && next === '/') {
+        inBlockComment = false
+        i++
+      }
+      continue
+    }
+
+    if (inString) {
+      result += ch
+      if (escaped) {
+        escaped = false
+      } else if (ch === '\\') {
+        escaped = true
+      } else if (ch === '"') {
+        inString = false
+      }
+      continue
+    }
+
+    if (ch === '"') {
+      inString = true
+      result += ch
+    } else if (ch === '/' && next === '/') {
+      inLineComment = true
+      i++
+    } else if (ch === '/' && next === '*') {
+      inBlockComment = true
+      i++
+    } else {
+      result += ch
+    }
+  }
+
+  return result
 }
 
 export function getDefaultConfigPath(): string {
@@ -83,18 +141,20 @@ export function getProviderBucket(config: ProviderConfig): BucketConfig {
 
 export async function loadConfig(configPath?: string): Promise<PluginConfig> {
   const path = configPath || getDefaultConfigPath()
-  
+
+  let content: string
   try {
-    const file = Bun.file(path)
-    const exists = await file.exists()
-    
-    if (!exists) {
+    content = await readFile(path, 'utf-8')
+  } catch (error: any) {
+    if (error?.code === 'ENOENT') {
       await createDefaultConfig(path)
       return validateConfig({})
     }
-    
-    const content = await file.text()
-    const raw = JSON.parse(content)
+    throw error
+  }
+
+  try {
+    const raw = JSON.parse(stripJsonComments(content))
     return validateConfig(raw)
   } catch (error) {
     if (error instanceof SyntaxError) {
@@ -144,8 +204,6 @@ async function createDefaultConfig(path: string): Promise<void> {
 `
   
   try {
-    const { mkdirSync, writeFileSync } = await import('fs')
-    const { dirname } = await import('path')
     const dir = dirname(path)
     mkdirSync(dir, { recursive: true })
     writeFileSync(path, defaultConfig, 'utf-8')
