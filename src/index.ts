@@ -2,6 +2,7 @@ import type { Plugin } from "@opencode-ai/plugin"
 import { loadConfig } from './config'
 import { KeyRotator } from './key-rotator'
 import { TokenBucket } from './token-bucket'
+import { ExponentialBackoff } from './exponential-backoff'
 import { PluginConfig, Stats } from './types'
 
 const DEFAULT_CONFIG_PATH = undefined
@@ -15,6 +16,12 @@ export const PoorguyRatelimit: Plugin = async ({ client, project, directory }) =
 
   const rotator = new KeyRotator()
   const buckets: Map<string, TokenBucket> = new Map()
+  const backoff = new ExponentialBackoff(
+    config.backoff.maxRetries,
+    config.backoff.baseDelayMs,
+    config.backoff.maxDelayMs,
+    config.backoff.jitterFactor
+  )
   const stats: Stats = {
     totalRequests: 0,
     successfulRequests: 0,
@@ -112,7 +119,21 @@ export const PoorguyRatelimit: Plugin = async ({ client, project, directory }) =
         const error = event.properties?.error
         if (error?.status === 429 || error?.message?.includes('rate limit')) {
           stats.errors429++
-          await log(`429 error detected: ${error.message}`, 'warn')
+          
+          const providerName = error?.provider
+          const keyUsed = error?.key
+          
+          if (providerName && keyUsed) {
+            rotator.mark429(providerName, keyUsed)
+            if (!stats.byKey[`${providerName}:${keyUsed}`]) {
+              stats.byKey[`${providerName}:${keyUsed}`] = { requests: 0, errors429: 0, lastUsed: 0 }
+            }
+            stats.byKey[`${providerName}:${keyUsed}`].errors429++
+            
+            await log(`429 error for key ${keyUsed.slice(-4)} on ${providerName}, switching key`, 'warn')
+          } else {
+            await log(`429 error detected: ${error.message}`, 'warn')
+          }
         }
       }
     }
