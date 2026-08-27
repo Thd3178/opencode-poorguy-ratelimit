@@ -1,4 +1,4 @@
-# @Thd3178/opencode-poorguy-ratelimit
+# @thd3178/opencode-poorguy-ratelimit
 
 OpenCode 插件 - 多API Key轮询 + Token Bucket限流，突破单Key RPM限制，预防429错误。
 
@@ -13,7 +13,7 @@ OpenCode 插件 - 多API Key轮询 + Token Bucket限流，突破单Key RPM限制
 ## 安装
 
 ```bash
-npm install @Thd3178/opencode-poorguy-ratelimit
+npm install @thd3178/opencode-poorguy-ratelimit
 ```
 
 ## 配置
@@ -22,7 +22,7 @@ npm install @Thd3178/opencode-poorguy-ratelimit
 
 ```json
 {
-  "plugin": ["@Thd3178/opencode-poorguy-ratelimit"]
+  "plugin": ["@thd3178/opencode-poorguy-ratelimit"]
 }
 ```
 
