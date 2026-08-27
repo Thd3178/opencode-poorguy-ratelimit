@@ -102,11 +102,17 @@ export const PoorguyRatelimit: Plugin = async ({ client, project, directory }) =
       const bucketSize = bucketSizes.get(bucketKey) || 20
       await toast(`🔑 Key [${selectedKey.name}] | Bucket: ${Math.floor(tokensAfter)}/${bucketSize}`, 'info')
 
-      output.options = output.options || {}
-      output.options.headers = output.options.headers || {}
-      output.options.headers['Authorization'] = `Bearer ${selectedKey.key}`
-      
       await log(`Using key ${selectedKey.name} for ${providerName}, tokens: ${Math.floor(tokensAfter)}`, 'debug')
+    },
+
+    "chat.headers": async (input, output) => {
+      const providerName = input.model.providerID
+      if (!config.providers[providerName]) return
+
+      const sessionKey = sessionKeys.get(input.sessionID)
+      if (sessionKey) {
+        output.headers['Authorization'] = `Bearer ${sessionKey.key}`
+      }
     },
 
     event: async ({ event }) => {
