@@ -17,6 +17,7 @@ export const PoorguyRatelimit: Plugin = async ({ client, project, directory }) =
 
   const rotator = new KeyRotator()
   const buckets: Map<string, TokenBucket> = new Map()
+  const bucketSizes: Map<string, number> = new Map()
   const backoff = new ExponentialBackoff(
     config.backoff.maxRetries,
     config.backoff.baseDelayMs,
@@ -35,7 +36,9 @@ export const PoorguyRatelimit: Plugin = async ({ client, project, directory }) =
     
     for (const key of providerConfig.keys) {
       const keyStr = typeof key === 'string' ? key : key.key
-      buckets.set(`${name}:${keyStr}`, new TokenBucket(bucketConfig.size, bucketConfig.refillRate))
+      const bucketKeyStr = `${name}:${keyStr}`
+      buckets.set(bucketKeyStr, new TokenBucket(bucketConfig.size, bucketConfig.refillRate))
+      bucketSizes.set(bucketKeyStr, bucketConfig.size)
     }
   }
 
@@ -80,12 +83,14 @@ export const PoorguyRatelimit: Plugin = async ({ client, project, directory }) =
         return
       }
 
+      const tokensBefore = bucket.getTokens()
+      
       if (!bucket.tryConsume()) {
         const waitTime = bucket.getWaitTime()
         statsCollector.recordRateLimit(providerName, waitTime)
         
         await log(`Rate limited for ${providerName}, waiting ${waitTime}ms`, 'info')
-        await toast(`Rate limited, waiting ${Math.ceil(waitTime/1000)}s...`, 'warning')
+        await toast(`⏳ Bucket [${selectedKey.name}] empty, waiting ${Math.ceil(waitTime/1000)}s...`, 'warning')
         
         await new Promise(resolve => setTimeout(resolve, waitTime))
         bucket.tryConsume()
@@ -94,10 +99,14 @@ export const PoorguyRatelimit: Plugin = async ({ client, project, directory }) =
       rotator.markUsed(providerName, selectedKey.key)
       statsCollector.recordRequest(providerName, selectedKey.key)
 
+      const tokensAfter = bucket.getTokens()
+      const bucketSize = bucketSizes.get(bucketKey) || 20
+      await toast(`🔑 Key [${selectedKey.name}] | Bucket: ${Math.floor(tokensAfter)}/${bucketSize}`, 'info')
+
       output.options = output.options || {}
       output.options.apiKey = selectedKey.key
       
-      await log(`Using key ${selectedKey.name} for ${providerName}`, 'debug')
+      await log(`Using key ${selectedKey.name} for ${providerName}, tokens: ${Math.floor(tokensAfter)}`, 'debug')
     },
 
     event: async ({ event }) => {
