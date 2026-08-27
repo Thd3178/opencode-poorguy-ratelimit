@@ -53,6 +53,12 @@ export const PoorguyRatelimit: Plugin = async ({ client, project, directory }) =
     })
   }
 
+  async function toast(message: string, variant: 'info' | 'success' | 'error' | 'warning' = 'info') {
+    await client.tui.showToast({
+      body: { message, variant }
+    })
+  }
+
   return {
     "chat.params": async (input, output) => {
       const providerName = input.provider.id
@@ -79,6 +85,7 @@ export const PoorguyRatelimit: Plugin = async ({ client, project, directory }) =
         statsCollector.recordRateLimit(providerName, waitTime)
         
         await log(`Rate limited for ${providerName}, waiting ${waitTime}ms`, 'info')
+        await toast(`Rate limited, waiting ${Math.ceil(waitTime/1000)}s...`, 'warning')
         
         await new Promise(resolve => setTimeout(resolve, waitTime))
         bucket.tryConsume()
@@ -105,8 +112,10 @@ export const PoorguyRatelimit: Plugin = async ({ client, project, directory }) =
             statsCollector.record429(providerName, keyUsed)
             
             await log(`429 error for key ${keyUsed.slice(-4)} on ${providerName}, switching key`, 'warn')
+            await toast(`429 error! Switching key...`, 'error')
           } else {
             await log(`429 error detected: ${error.message}`, 'warn')
+            await toast(`429 rate limit error!`, 'error')
           }
         }
       }
