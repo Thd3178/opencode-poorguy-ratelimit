@@ -89,6 +89,7 @@ export async function loadConfig(configPath?: string): Promise<PluginConfig> {
     const exists = await file.exists()
     
     if (!exists) {
+      await createDefaultConfig(path)
       return validateConfig({})
     }
     
@@ -101,4 +102,48 @@ export async function loadConfig(configPath?: string): Promise<PluginConfig> {
     }
     throw error
   }
+}
+
+async function createDefaultConfig(path: string): Promise<void> {
+  const defaultConfig = `{
+  // 插件总开关
+  "enabled": true,
+  
+  // 轮询策略：round-robin | least-used | random
+  "strategy": "round-robin",
+  
+  // 需要轮询的provider配置
+  // 请添加你的API keys
+  "providers": {
+    // "nvidia-nim": {
+    //   "keys": ["sk-your-key-1", "sk-your-key-2"],
+    //   "rpm": 40
+    // }
+  },
+
+  // 429错误处理（指数退避）
+  "backoff": {
+    "enabled": true,
+    "maxRetries": 3,
+    "baseDelayMs": 5000,
+    "maxDelayMs": 120000,
+    "jitterFactor": 0.2
+  },
+
+  // 日志配置
+  "logging": {
+    "enabled": true,
+    "level": "info"
+  },
+
+  // 统计配置
+  "stats": {
+    "enabled": true
+  }
+}
+`
+  
+  const dir = path.substring(0, path.lastIndexOf('/'))
+  await Bun.spawn(['mkdir', '-p', dir]).exited
+  await Bun.write(path, defaultConfig)
 }
