@@ -3,7 +3,8 @@ import { loadConfig } from './config'
 import { KeyRotator } from './key-rotator'
 import { TokenBucket } from './token-bucket'
 import { ExponentialBackoff } from './exponential-backoff'
-import { PluginConfig, Stats } from './types'
+import { StatsCollector } from './stats'
+import { PluginConfig } from './types'
 
 const DEFAULT_CONFIG_PATH = undefined
 
@@ -22,15 +23,7 @@ export const PoorguyRatelimit: Plugin = async ({ client, project, directory }) =
     config.backoff.maxDelayMs,
     config.backoff.jitterFactor
   )
-  const stats: Stats = {
-    totalRequests: 0,
-    successfulRequests: 0,
-    rateLimitedRequests: 0,
-    errors429: 0,
-    totalWaitTime: 0,
-    byProvider: {},
-    byKey: {}
-  }
+  const statsCollector = new StatsCollector()
 
   for (const [name, providerConfig] of Object.entries(config.providers)) {
     rotator.addProvider(name, providerConfig)
@@ -68,12 +61,6 @@ export const PoorguyRatelimit: Plugin = async ({ client, project, directory }) =
         return
       }
 
-      stats.totalRequests++
-      if (!stats.byProvider[providerName]) {
-        stats.byProvider[providerName] = { requests: 0, errors429: 0, waitTime: 0 }
-      }
-      stats.byProvider[providerName].requests++
-
       const selectedKey = rotator.getKey(providerName, config.strategy)
       if (!selectedKey) {
         await log(`No keys available for provider: ${providerName}`, 'warn')
@@ -89,9 +76,7 @@ export const PoorguyRatelimit: Plugin = async ({ client, project, directory }) =
 
       if (!bucket.tryConsume()) {
         const waitTime = bucket.getWaitTime()
-        stats.rateLimitedRequests++
-        stats.totalWaitTime += waitTime
-        stats.byProvider[providerName].waitTime += waitTime
+        statsCollector.recordRateLimit(providerName, waitTime)
         
         await log(`Rate limited for ${providerName}, waiting ${waitTime}ms`, 'info')
         
@@ -100,13 +85,7 @@ export const PoorguyRatelimit: Plugin = async ({ client, project, directory }) =
       }
 
       rotator.markUsed(providerName, selectedKey.key)
-      stats.successfulRequests++
-      
-      if (!stats.byKey[bucketKey]) {
-        stats.byKey[bucketKey] = { requests: 0, errors429: 0, lastUsed: 0 }
-      }
-      stats.byKey[bucketKey].requests++
-      stats.byKey[bucketKey].lastUsed = Date.now()
+      statsCollector.recordRequest(providerName, selectedKey.key)
 
       output.options = output.options || {}
       output.options.apiKey = selectedKey.key
@@ -118,17 +97,12 @@ export const PoorguyRatelimit: Plugin = async ({ client, project, directory }) =
       if (event.type === 'session.error') {
         const error = event.properties?.error
         if (error?.status === 429 || error?.message?.includes('rate limit')) {
-          stats.errors429++
-          
           const providerName = error?.provider
           const keyUsed = error?.key
           
           if (providerName && keyUsed) {
             rotator.mark429(providerName, keyUsed)
-            if (!stats.byKey[`${providerName}:${keyUsed}`]) {
-              stats.byKey[`${providerName}:${keyUsed}`] = { requests: 0, errors429: 0, lastUsed: 0 }
-            }
-            stats.byKey[`${providerName}:${keyUsed}`].errors429++
+            statsCollector.record429(providerName, keyUsed)
             
             await log(`429 error for key ${keyUsed.slice(-4)} on ${providerName}, switching key`, 'warn')
           } else {
