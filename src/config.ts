@@ -143,7 +143,13 @@ async function createDefaultConfig(path: string): Promise<void> {
 }
 `
   
-  const dir = path.substring(0, path.lastIndexOf('/'))
-  await Bun.spawn(['mkdir', '-p', dir]).exited
-  await Bun.write(path, defaultConfig)
+  try {
+    const { mkdirSync, writeFileSync } = await import('fs')
+    const { dirname } = await import('path')
+    const dir = dirname(path)
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(path, defaultConfig, 'utf-8')
+  } catch (e) {
+    // Ignore errors if file already exists or cannot be created
+  }
 }
