@@ -1,0 +1,44 @@
+{
+  // 插件总开关
+  "enabled": true,
+  
+  // 轮询策略：round-robin | least-used | random
+  "strategy": "round-robin",
+  
+  // 需要轮询的provider配置
+  "providers": {
+    "nvidia-nim": {
+      "keys": [
+        "sk-your-key-1",
+        "sk-your-key-2"
+      ],
+      "rpm": 40
+    },
+    "other-provider": {
+      "keys": [
+        "sk-your-other-key"
+      ],
+      "rpm": 60
+    }
+  },
+
+  // 429错误处理（指数退避）
+  "backoff": {
+    "enabled": true,
+    "maxRetries": 3,
+    "baseDelayMs": 5000,
+    "maxDelayMs": 120000,
+    "jitterFactor": 0.2
+  },
+
+  // 日志配置
+  "logging": {
+    "enabled": true,
+    "level": "info"
+  },
+
+  // 统计配置
+  "stats": {
+    "enabled": true
+  }
+}
