@@ -103,7 +103,8 @@ export const PoorguyRatelimit: Plugin = async ({ client, project, directory }) =
       await toast(`🔑 Key [${selectedKey.name}] | Bucket: ${Math.floor(tokensAfter)}/${bucketSize}`, 'info')
 
       output.options = output.options || {}
-      output.options.apiKey = selectedKey.key
+      output.options.headers = output.options.headers || {}
+      output.options.headers['Authorization'] = `Bearer ${selectedKey.key}`
       
       await log(`Using key ${selectedKey.name} for ${providerName}, tokens: ${Math.floor(tokensAfter)}`, 'debug')
     },
