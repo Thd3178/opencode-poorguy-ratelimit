@@ -162,12 +162,14 @@ export function wrapFetch(
     const acq = await limiter.acquire()
     if (acq.waitedMs > 0) {
       await toast(
-        `⏳ [${limiter.name}] 限流生效，等待 ${(acq.waitedMs / 1000).toFixed(1)}s（${limiter.rpm} req/min × ${acq.totalKeys} key）`,
+        `⏳ [${limiter.name}] 等待 ${(acq.waitedMs / 1000).toFixed(1)}s（${limiter.rpm} req/min × ${acq.totalKeys} key）`,
         'warning'
       )
-    } else if (verboseLog) {
-      fileLog('info', `[${limiter.name}] req key=…${acq.tail} （窗口 ${acq.windowUsed}/${limiter.rpm}，key ${acq.keyIndex + 1}/${acq.totalKeys}）`)
     }
+    await toast(
+      `🔑 [${limiter.name}] key…${acq.tail} · 窗口 ${acq.windowUsed}/${limiter.rpm} · key ${acq.keyIndex + 1}/${acq.totalKeys}`,
+      'info'
+    )
 
     // 轮换 Authorization 头
     const headers = new Headers(init?.headers)
