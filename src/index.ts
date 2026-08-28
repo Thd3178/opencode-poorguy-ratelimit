@@ -14,6 +14,7 @@ export const PoorguyRatelimit: Plugin = async ({ client }) => {
       windowMs: 60000,
       baseCooldownMs: config.backoff.baseDelayMs,
       maxCooldownMs: Math.min(config.backoff.maxDelayMs, 61000),
+      maxConcurrent: p.maxConcurrent ?? 2,
       strategy: config.strategy,
       onWait: (ms) => {
         toast(`⏳ [${name}] 触发限流，等待 ${(ms / 1000).toFixed(1)}s（${limiters.get(name)?.remaining() ?? 0} 剩余额度）`, 'warning')

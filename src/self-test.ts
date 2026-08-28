@@ -2,7 +2,7 @@ import { ProviderLimiter } from './fetch-interceptor'
 import { BackoffConfig } from './types'
 
 const mkOpts = (strategy: 'round-robin' | 'least-used' | 'random', windowMs: number) => ({
-  windowMs, baseCooldownMs: 100, maxCooldownMs: 1000, strategy,
+  windowMs, baseCooldownMs: 100, maxCooldownMs: 1000, maxConcurrent: 100, strategy,
 })
 
 function assert(cond: boolean, msg: string) {
@@ -61,12 +61,54 @@ async function testSingleKeyAllWait() {
   assert(took >= 60, `single-key 429: 实际耗时含冷却（${took}ms）`)
 }
 
+async function testConcurrencyGate() {
+  const lim = new ProviderLimiter('t', [{ key: 'AAAAAAAAAAAA1111' }], 100,
+    { windowMs: 60000, baseCooldownMs: 100, maxCooldownMs: 500, maxConcurrent: 2, strategy: 'round-robin' })
+
+  let inflight = 0
+  let maxInflight = 0
+  let completed = 0
+  const total = 6
+
+  await Promise.all(Array.from({ length: total }, () => (async () => {
+    await lim.acquire()
+    await lim.acquireSlot()
+    inflight++
+    maxInflight = Math.max(maxInflight, inflight)
+    await new Promise(r => setTimeout(r, 120))
+    lim.releaseSlot()
+    inflight--
+    completed++
+  })()))
+
+  assert(completed === total, `并发闸门：6 个请求都能完成（完成 ${completed}）`)
+  assert(maxInflight <= 2, `并发闸门：同时在走的不超过 2（峰值 ${maxInflight}）`)
+
+  // 排队行为验证：第 3 个必须等待前两个之一释放
+  let secondRoundSawTwo = false
+  const order: string[] = []
+  const lim2 = new ProviderLimiter('t', [{ key: 'BBBB1111' }], 100,
+    { windowMs: 60000, baseCooldownMs: 100, maxCooldownMs: 500, maxConcurrent: 1, strategy: 'round-robin' })
+  const tasks = ['a','b'].map(id => (async () => {
+    await lim2.acquire()
+    await lim2.acquireSlot()
+    order.push(`in:${id}`)
+    await new Promise(r => setTimeout(r, 80))
+    lim2.releaseSlot()
+  })().then(() => order.push(`out:${id}`)))
+  await Promise.all(tasks)
+  const idx = JSON.stringify(order)
+  assert(order.indexOf('in:a') < order.indexOf('in:b') && order.indexOf('in:b') > order.indexOf('out:a'),
+    `并发闸门 maxConcurrent=1 串行化：b 在 a 完成后才开始（order=${idx}）`)
+}
+
 async function main() {
   await testRoundRobin()
   await testWindowThrottle()
   await testMultiKeyCapacity()
   await testCooldownSkipsKey()
   await testSingleKeyAllWait()
+  await testConcurrencyGate()
   console.log('done.')
 }
 

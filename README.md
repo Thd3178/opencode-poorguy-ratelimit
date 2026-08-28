@@ -105,6 +105,7 @@ npm 包名写进 `~/.config/opencode/opencode.jsonc`（或 `.json`）的 `plugin
 | `providers` | object | `{}` | **只有列在这里的 provider 才会被限流/轮换**；未配置的 provider 完全插件不管 |
 | `providers.<name>.rpm` | number | `40` | 每把 key 每分钟允许请求数；总吞吐 = `rpm × key 数量` |
 | `providers.<name>.keys` | string[] | 无 | 可选。配置了就在这几把之间轮换；未配置则自动读取 `opencode.json` 中该 provider 的 `options.apiKey`（**不需要在插件配置里重复写 key**） |
+| `providers.<name>.maxConcurrent` | number | `2` | 同一时刻允许最多几个**并发请求**。超出的请求排队等前面的请求（包括流式接收完成）再发，防止 NIM 因并发触发 429 |
 | `backoff.enabled` | boolean | `true` | 429 时是否对该 key 做指数冷却 |
 | `backoff.baseDelayMs` | number | `5000` | 首次 429 的基础冷却毫秒数 |
 | `backoff.maxDelayMs` | number | `120000` | 冷却上限 |

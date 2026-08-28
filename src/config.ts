@@ -163,6 +163,7 @@ export async function validateConfig(raw: any): Promise<PluginConfig> {
       providers[name] = {
         keys: allKeys,
         rpm: pConfig.rpm ?? DEFAULT_RPM,
+        maxConcurrent: typeof pConfig.maxConcurrent === 'number' && pConfig.maxConcurrent > 0 ? pConfig.maxConcurrent : 2,
         bucket: pConfig.bucket
       }
     }

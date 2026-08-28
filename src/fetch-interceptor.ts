@@ -25,6 +25,7 @@ interface LimiterOptions {
   windowMs: number          // 滑动窗口长度（ms）。NIM = 61000
   baseCooldownMs: number    // 无 Retry-After 头时的首次冷却毫秒
   maxCooldownMs: number     // 冷却硬上限
+  maxConcurrent: number     // 该 provider 同时可发出的最大并发请求数
   strategy: 'round-robin' | 'least-used' | 'random'
   onWait?: (ms: number) => void
 }
@@ -42,6 +43,7 @@ export class ProviderLimiter {
     private opts: LimiterOptions
   ) {
     if (keyCfgs.length === 0) throw new Error(`ProviderLimiter ${name}: no keys`)
+    this._maxConcurrent = opts.maxConcurrent
     this.keys = keyCfgs.map(k => ({
       key: k.key, name: k.name ?? k.key.slice(-4),
       hits: [], cooldownUntil: 0, error429Count: 0, lastSuccessAt: 0
@@ -116,6 +118,29 @@ export class ProviderLimiter {
 
   get totalKeyCount(): number { return this.keys.length }
 
+  // —— 并发闸门 ——
+  setMaxConcurrent(n: number) { this._maxConcurrent = n }
+  private _maxConcurrent: number
+  private inFlight = 0
+  private queue: (() => void)[] = []
+
+  /** 抢到并发位才算真的放行；超额则排队等待前面的请求完成 */
+  async acquireSlot(): Promise<void> {
+    if (this.inFlight < this._maxConcurrent) {
+      this.inFlight++
+      return
+    }
+    fileLog('info', `[${this.name}] 并发位已满 (${this.inFlight}/${this._maxConcurrent})，排队等待`)
+    await new Promise<void>(r => this.queue.push(r))
+    this.inFlight++
+  }
+
+  releaseSlot(): void {
+    this.inFlight--
+    const next = this.queue.shift()
+    if (next) next()
+  }
+
   private orderedAvailable(now: number): KeyState[] {
     const avail = this.keys.filter(k => k.cooldownUntil <= now)
     if (avail.length === 0) return []
@@ -172,7 +197,9 @@ export function wrapFetch(
     let lastRes: Response | undefined
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      const acq = await limiter.acquire()
+      const acq = await limiter.acquire()        // 窗口额度
+      await limiter.acquireSlot()                // 并发位
+
       if (acq.waitedMs > 0) {
         await toast(`⏳ [${limiter.name}] 等待 ${(acq.waitedMs / 1000).toFixed(1)}s（${acq.totalKeys} key×${limiter.rpm}/min）`, 'warning')
       }
@@ -182,25 +209,63 @@ export function wrapFetch(
       headers.set('Authorization', `Bearer ${acq.key}`)
       const finalInit = { ...(init ?? {}), headers }
 
-      const res = await origFetch(input, finalInit)
+      let res: Response
+      try {
+        res = await origFetch(input, finalInit)
+      } catch (e) {
+        limiter.releaseSlot()
+        throw e
+      }
       fileLog('info', `[${limiter.name}] key=…${acq.tail} wait=${acq.waitedMs}ms attempt=${attempt + 1}/${maxAttempts} -> ${res.status}`)
 
-      if (res.status !== 429) {
-        limiter.noteSuccess(acq.tail)
-        if (attempt > 0) {
-          await toast(`✅ [${limiter.name}] key…${acq.tail} 第 ${attempt + 1} 次成功`, 'success')
-        }
-        return res
+      if (res.status === 429) {
+        limiter.releaseSlot()
+        const cd = limiter.mark429(acq.tail, res.headers)
+        lastRes = res
+        await toast(`🚫 [${limiter.name}] key…${acq.tail} 429，冷却 ${(cd / 1000).toFixed(0)}s${attempt < maxAttempts - 1 ? '，换下一把' : '，key 用尽交 opencode 重试'}`, 'error')
+        continue
       }
 
-      // 429：取 Retry-After / Retry-After-Ms，没有就按 baseCooldownMs 指数算
-      const cd = limiter.mark429(acq.tail, res.headers)
-      lastRes = res
-      await toast(`🚫 [${limiter.name}] key…${acq.tail} 429，冷却 ${(cd / 1000).toFixed(0)}s${attempt < maxAttempts - 1 ? '，换下一把' : '，key 用尽交 opencode 重试'}`, 'error')
+      // 非 429：成功的请求在流读完/关闭前一直占用并发位
+      limiter.noteSuccess(acq.tail)
+      if (attempt > 0) {
+        await toast(`✅ [${limiter.name}] key…${acq.tail} 第 ${attempt + 1} 次成功`, 'success')
+      }
+      return wrapResponseForSlot(res, () => limiter.releaseSlot())
     }
 
     // 所有 key 都 429，把最后的 429 响应还回去，让 opencode 自己的重试来扛
     return lastRes!
   }
   return wrapped
+}
+
+/** 流式响应期间保持并发位不释放；读尽/关闭时归还 */
+function wrapResponseForSlot(res: Response, release: () => void): Response {
+  if (!res.body) {
+    release()
+    return res
+  }
+  const { readable, writable } = new TransformStream()
+  const reader = res.body.getReader()
+  const writer = writable.getWriter()
+  ;(async () => {
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        await writer.write(value)
+      }
+      await writer.close()
+    } catch (e) {
+      try { writer.abort(e) } catch {}
+    } finally {
+      release()
+    }
+  })()
+  return new Response(readable, {
+    status: res.status,
+    statusText: res.statusText,
+    headers: res.headers
+  })
 }

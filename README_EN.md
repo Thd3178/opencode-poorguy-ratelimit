@@ -66,6 +66,7 @@ With explicit keys for rotation:
 | `providers` | object | `{}` | **Only providers listed here are managed.** Unconfigured providers are untouched. |
 | `providers.<name>.rpm` | number | `40` | Requests/min per key. Total throughput = `rpm × key count` |
 | `providers.<name>.keys` | string[] | auto | Optional extra API keys. If omitted, the plugin reads `options.apiKey` from `opencode.json` for that provider |
+| `providers.<name>.maxConcurrent` | number | `2` | Max in-flight requests at any instant. Extra requests queue until predecessors (including streaming) finish. Set low to avoid NIM's concurrent-request 429s |
 | `backoff.enabled` | boolean | `true` | Exponential cooldown on 429 per key |
 | `backoff.baseDelayMs` | number | `5000` | Initial cooldown (ms) on first 429 |
 | `backoff.maxDelayMs` | number | `120000` | Max cooldown (ms) |

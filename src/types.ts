@@ -11,6 +11,7 @@ export interface BucketConfig {
 export interface ProviderConfig {
   keys?: (string | KeyConfig)[]
   rpm?: number
+  maxConcurrent?: number
   bucket?: Partial<BucketConfig>
 }
 
