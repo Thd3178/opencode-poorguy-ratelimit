@@ -21,6 +21,8 @@ const DEFAULT_STATS = {
   enabled: true
 }
 
+const DEFAULT_RPM = 40
+
 function calculateBucket(rpm: number, override?: Partial<BucketConfig>): BucketConfig {
   return {
     size: override?.size ?? Math.ceil(rpm / 2),
@@ -91,11 +93,41 @@ function stripJsonComments(text: string): string {
   return result
 }
 
+async function readJsonFile(filePath: string): Promise<any> {
+  try {
+    const content = await readFile(filePath, 'utf-8')
+    return JSON.parse(stripJsonComments(content))
+  } catch {
+    return {}
+  }
+}
+
+async function loadOpencodeProviderKeys(): Promise<Record<string, string>> {
+  const configDir = join(homedir(), '.config', 'opencode')
+  const json = await readJsonFile(join(configDir, 'opencode.json'))
+  const jsonc = await readJsonFile(join(configDir, 'opencode.jsonc'))
+
+  const keys: Record<string, string> = {}
+  const allProviderNames = new Set([
+    ...Object.keys(json?.provider ?? {}),
+    ...Object.keys(jsonc?.provider ?? {})
+  ])
+
+  for (const name of allProviderNames) {
+    const provider = jsonc?.provider?.[name] ?? json?.provider?.[name]
+    if (provider?.options?.apiKey) {
+      keys[name] = provider.options.apiKey
+    }
+  }
+
+  return keys
+}
+
 export function getDefaultConfigPath(): string {
   return join(homedir(), '.config', 'opencode', 'opencode-poorguy-ratelimit.jsonc')
 }
 
-export function validateConfig(raw: any): PluginConfig {
+export async function validateConfig(raw: any): Promise<PluginConfig> {
   if (!raw || typeof raw !== 'object') {
     throw new Error('Invalid config: must be an object')
   }
@@ -107,19 +139,30 @@ export function validateConfig(raw: any): PluginConfig {
     throw new Error(`Invalid strategy: ${strategy}`)
   }
 
+  const opencodeKeys = await loadOpencodeProviderKeys()
+
   const providers: Record<string, ProviderConfig> = {}
+
   if (raw.providers && typeof raw.providers === 'object') {
     for (const [name, config] of Object.entries(raw.providers)) {
       const pConfig = config as any
-      if (!pConfig.keys || !Array.isArray(pConfig.keys) || pConfig.keys.length === 0) {
-        throw new Error(`Provider ${name}: keys must be a non-empty array`)
+      const autoKey = opencodeKeys[name]
+      const explicitKeys = pConfig.keys
+        ? pConfig.keys.map(normalizeKey)
+        : []
+
+      const allKeys = [...explicitKeys]
+      if (autoKey && !allKeys.some(k => k.key === autoKey)) {
+        allKeys.push(normalizeKey(autoKey))
       }
-      if (!pConfig.rpm || typeof pConfig.rpm !== 'number' || pConfig.rpm <= 0) {
-        throw new Error(`Provider ${name}: rpm must be a positive number`)
+
+      if (allKeys.length === 0) {
+        throw new Error(`Provider ${name}: no keys found. Add keys in plugin config or set apiKey in opencode.json provider options`)
       }
+
       providers[name] = {
-        keys: pConfig.keys.map(normalizeKey),
-        rpm: pConfig.rpm,
+        keys: allKeys,
+        rpm: pConfig.rpm ?? DEFAULT_RPM,
         bucket: pConfig.bucket
       }
     }
@@ -136,7 +179,8 @@ export function validateConfig(raw: any): PluginConfig {
 }
 
 export function getProviderBucket(config: ProviderConfig): BucketConfig {
-  return calculateBucket(config.rpm, config.bucket)
+  const rpm = config.rpm ?? DEFAULT_RPM
+  return calculateBucket(rpm, config.bucket)
 }
 
 export async function loadConfig(configPath?: string): Promise<PluginConfig> {
@@ -155,7 +199,7 @@ export async function loadConfig(configPath?: string): Promise<PluginConfig> {
 
   try {
     const raw = JSON.parse(stripJsonComments(content))
-    return validateConfig(raw)
+    return await validateConfig(raw)
   } catch (error) {
     if (error instanceof SyntaxError) {
       throw new Error(`Invalid JSON in config file: ${path}`)
@@ -166,22 +210,9 @@ export async function loadConfig(configPath?: string): Promise<PluginConfig> {
 
 async function createDefaultConfig(path: string): Promise<void> {
   const defaultConfig = `{
-  // 插件总开关
   "enabled": true,
-  
-  // 轮询策略：round-robin | least-used | random
   "strategy": "round-robin",
-  
-  // 需要轮询的provider配置
-  // 请添加你的API keys
-  "providers": {
-    // "nvidia-nim": {
-    //   "keys": ["sk-your-key-1", "sk-your-key-2"],
-    //   "rpm": 40
-    // }
-  },
-
-  // 429错误处理（指数退避）
+  "providers": {},
   "backoff": {
     "enabled": true,
     "maxRetries": 3,
@@ -189,14 +220,10 @@ async function createDefaultConfig(path: string): Promise<void> {
     "maxDelayMs": 120000,
     "jitterFactor": 0.2
   },
-
-  // 日志配置
   "logging": {
     "enabled": true,
     "level": "info"
   },
-
-  // 统计配置
   "stats": {
     "enabled": true
   }

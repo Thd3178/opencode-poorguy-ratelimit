@@ -9,8 +9,8 @@ export interface BucketConfig {
 }
 
 export interface ProviderConfig {
-  keys: (string | KeyConfig)[]
-  rpm: number
+  keys?: (string | KeyConfig)[]
+  rpm?: number
   bucket?: Partial<BucketConfig>
 }
 

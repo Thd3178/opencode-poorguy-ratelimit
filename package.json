@@ -1,6 +1,6 @@
 {
   "name": "@thd3178/opencode-poorguy-ratelimit",
-  "version": "1.5.3",
+  "version": "1.6.0",
   "description": "OpenCode plugin for multi-key rotation with token bucket rate limiting",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -26,8 +26,8 @@
     "@opencode-ai/plugin": "^1.0.0"
   },
   "devDependencies": {
-    "typescript": "^5.0.0",
-    "@types/node": "^20.0.0"
+    "@types/node": "^20.19.43",
+    "typescript": "^5.0.0"
   },
   "peerDependencies": {
     "@opencode-ai/plugin": "^1.0.0"
