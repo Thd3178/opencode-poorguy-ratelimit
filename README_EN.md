@@ -67,12 +67,9 @@ With explicit keys for rotation:
 | `providers.<name>.rpm` | number | `40` | Requests/min per key. Total throughput = `rpm × key count` |
 | `providers.<name>.keys` | string[] | auto | Optional extra API keys. If omitted, the plugin reads `options.apiKey` from `opencode.json` for that provider |
 | `providers.<name>.maxConcurrent` | number | `2` | Max in-flight requests at any instant. Extra requests queue until predecessors (including streaming) finish. Set low to avoid NIM's concurrent-request 429s |
-| `backoff.enabled` | boolean | `true` | Exponential cooldown on 429 per key |
-| `backoff.baseDelayMs` | number | `5000` | Initial cooldown (ms) on first 429 |
-| `backoff.maxDelayMs` | number | `120000` | Max cooldown (ms) |
-| `backoff.jitterFactor` | number | `0.2` | Random jitter to stagger recovery |
+| `backoff.baseDelayMs` | number | `5000` | Initial per-key cooldown (ms) on 429 when no `Retry-After` header; doubles on consecutive 429s |
+| `backoff.maxDelayMs` | number | `120000` | Cooldown cap (ms); effectively clamped to the 61s rate window |
 | `logging.enabled` | boolean | `true` | Write plugin logs to file |
-| `logging.level` | string | `"info"` | `debug` / `info` / `warn` / `error` |
 
 > The provider name must match the **object key** in `opencode.json` under `"providers"`, not the display name.
 

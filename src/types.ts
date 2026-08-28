@@ -1,34 +1,25 @@
 export interface KeyConfig {
   key: string
+  /** 展示名，默认取 key 尾 4 位 */
   name?: string
-}
-
-export interface BucketConfig {
-  size: number
-  refillRate: number
 }
 
 export interface ProviderConfig {
   keys?: (string | KeyConfig)[]
+  /** 每把 key 每分钟请求上限，默认 40 */
   rpm?: number
+  /** 同一时刻最多并发请求数，默认 2 */
   maxConcurrent?: number
-  bucket?: Partial<BucketConfig>
 }
 
 export interface BackoffConfig {
-  enabled: boolean
-  maxRetries: number
+  /** 429 后首次冷却毫秒数（无 Retry-After 头时），之后指数翻倍 */
   baseDelayMs: number
+  /** 冷却上限毫秒数 */
   maxDelayMs: number
-  jitterFactor: number
 }
 
 export interface LoggingConfig {
-  enabled: boolean
-  level: 'debug' | 'info' | 'warn' | 'error'
-}
-
-export interface StatsConfig {
   enabled: boolean
 }
 
@@ -38,39 +29,4 @@ export interface PluginConfig {
   providers: Record<string, ProviderConfig>
   backoff: BackoffConfig
   logging: LoggingConfig
-  stats: StatsConfig
-}
-
-export interface KeyState {
-  key: string
-  name: string
-  tokens: number
-  lastRefill: number
-  requestCount: number
-  error429Count: number
-  lastUsed: number
-  cooldownUntil: number
-}
-
-export interface ProviderState {
-  keys: KeyState[]
-  currentIndex: number
-}
-
-export interface Stats {
-  totalRequests: number
-  successfulRequests: number
-  rateLimitedRequests: number
-  errors429: number
-  totalWaitTime: number
-  byProvider: Record<string, {
-    requests: number
-    errors429: number
-    waitTime: number
-  }>
-  byKey: Record<string, {
-    requests: number
-    errors429: number
-    lastUsed: number
-  }>
 }

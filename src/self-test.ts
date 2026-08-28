@@ -1,5 +1,4 @@
 import { ProviderLimiter } from './fetch-interceptor'
-import { BackoffConfig } from './types'
 
 const mkOpts = (strategy: 'round-robin' | 'least-used' | 'random', windowMs: number) => ({
   windowMs, baseCooldownMs: 100, maxCooldownMs: 1000, maxConcurrent: 100, strategy,

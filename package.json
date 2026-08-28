@@ -1,7 +1,7 @@
 {
   "name": "@thd3178/opencode-poorguy-ratelimit",
-  "version": "1.7.0",
-  "description": "OpenCode plugin for multi-key rotation with token bucket rate limiting",
+  "version": "1.8.0",
+  "description": "OpenCode plugin for multi-key rotation with sliding-window rate limiting",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [
@@ -11,13 +11,14 @@
   "scripts": {
     "build": "bun build src/index.ts --outdir dist --target node",
     "dev": "bun build src/index.ts --outdir dist --target node --watch",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "bun src/self-test.ts && bun test/header-rotation.ts"
   },
   "keywords": [
     "opencode",
     "plugin",
     "rate-limit",
-    "token-bucket",
+    "sliding-window",
     "multi-key",
     "rotation"
   ],

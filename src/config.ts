@@ -1,34 +1,19 @@
-import { PluginConfig, ProviderConfig, BucketConfig, KeyConfig } from './types'
+import { PluginConfig, ProviderConfig, KeyConfig } from './types'
 import { join, dirname } from 'path'
 import { homedir } from 'os'
 import { readFile } from 'fs/promises'
 import { mkdirSync, writeFileSync } from 'fs'
 
 const DEFAULT_BACKOFF = {
-  enabled: true,
-  maxRetries: 3,
   baseDelayMs: 5000,
-  maxDelayMs: 120000,
-  jitterFactor: 0.2
+  maxDelayMs: 120000
 }
 
 const DEFAULT_LOGGING = {
-  enabled: true,
-  level: 'info' as const
-}
-
-const DEFAULT_STATS = {
   enabled: true
 }
 
 const DEFAULT_RPM = 40
-
-function calculateBucket(rpm: number, override?: Partial<BucketConfig>): BucketConfig {
-  return {
-    size: override?.size ?? Math.ceil(rpm / 2),
-    refillRate: override?.refillRate ?? rpm / 60
-  }
-}
 
 function normalizeKey(key: string | KeyConfig): KeyConfig {
   if (typeof key === 'string') {
@@ -163,8 +148,7 @@ export async function validateConfig(raw: any): Promise<PluginConfig> {
       providers[name] = {
         keys: allKeys,
         rpm: pConfig.rpm ?? DEFAULT_RPM,
-        maxConcurrent: typeof pConfig.maxConcurrent === 'number' && pConfig.maxConcurrent > 0 ? pConfig.maxConcurrent : 2,
-        bucket: pConfig.bucket
+        maxConcurrent: typeof pConfig.maxConcurrent === 'number' && pConfig.maxConcurrent > 0 ? pConfig.maxConcurrent : 2
       }
     }
   }
@@ -174,14 +158,8 @@ export async function validateConfig(raw: any): Promise<PluginConfig> {
     strategy: strategy as PluginConfig['strategy'],
     providers,
     backoff: { ...DEFAULT_BACKOFF, ...raw.backoff },
-    logging: { ...DEFAULT_LOGGING, ...raw.logging },
-    stats: { ...DEFAULT_STATS, ...raw.stats }
+    logging: { ...DEFAULT_LOGGING, ...raw.logging }
   }
-}
-
-export function getProviderBucket(config: ProviderConfig): BucketConfig {
-  const rpm = config.rpm ?? DEFAULT_RPM
-  return calculateBucket(rpm, config.bucket)
 }
 
 export async function loadConfig(configPath?: string): Promise<PluginConfig> {
@@ -210,22 +188,15 @@ export async function loadConfig(configPath?: string): Promise<PluginConfig> {
 }
 
 async function createDefaultConfig(path: string): Promise<void> {
-  const defaultConfig = `{
+    const defaultConfig = `{
   "enabled": true,
   "strategy": "round-robin",
   "providers": {},
   "backoff": {
-    "enabled": true,
-    "maxRetries": 3,
     "baseDelayMs": 5000,
-    "maxDelayMs": 120000,
-    "jitterFactor": 0.2
+    "maxDelayMs": 120000
   },
   "logging": {
-    "enabled": true,
-    "level": "info"
-  },
-  "stats": {
     "enabled": true
   }
 }

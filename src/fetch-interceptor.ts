@@ -22,7 +22,7 @@ export interface Acquired {
 }
 
 interface LimiterOptions {
-  windowMs: number          // 滑动窗口长度（ms）。NIM = 61000
+  windowMs: number          // 滑动窗口长度（ms）。NIM 按 61000（60s + 1s 余量）
   baseCooldownMs: number    // 无 Retry-After 头时的首次冷却毫秒
   maxCooldownMs: number     // 冷却硬上限
   maxConcurrent: number     // 该 provider 同时可发出的最大并发请求数
@@ -43,7 +43,7 @@ export class ProviderLimiter {
     private opts: LimiterOptions
   ) {
     if (keyCfgs.length === 0) throw new Error(`ProviderLimiter ${name}: no keys`)
-    this._maxConcurrent = opts.maxConcurrent
+    this._maxConcurrent = opts.maxConcurrent > 0 ? opts.maxConcurrent : 2
     this.keys = keyCfgs.map(k => ({
       key: k.key, name: k.name ?? k.key.slice(-4),
       hits: [], cooldownUntil: 0, error429Count: 0, lastSuccessAt: 0
@@ -189,8 +189,7 @@ export class ProviderLimiter {
 export function wrapFetch(
   origFetch: typeof globalThis.fetch,
   limiter: ProviderLimiter,
-  toast: ToastFn,
-  verboseLog: boolean
+  toast: ToastFn
 ): typeof globalThis.fetch {
   const wrapped: typeof globalThis.fetch = async (input: any, init?: any) => {
     const maxAttempts = limiter.totalKeyCount  // 每把 key 试一次，全部失败才还给 opencode
@@ -200,9 +199,6 @@ export function wrapFetch(
       const acq = await limiter.acquire()        // 窗口额度
       await limiter.acquireSlot()                // 并发位
 
-      if (acq.waitedMs > 0) {
-        await toast(`⏳ [${limiter.name}] 等待 ${(acq.waitedMs / 1000).toFixed(1)}s（${acq.totalKeys} key×${limiter.rpm}/min）`, 'warning')
-      }
       await toast(`🔑 [${limiter.name}] key…${acq.tail} · 窗口 ${acq.windowUsed}/${limiter.rpm} · key ${acq.keyIndex + 1}/${acq.totalKeys}`, 'info')
 
       const headers = new Headers(init?.headers)
@@ -231,7 +227,7 @@ export function wrapFetch(
       if (attempt > 0) {
         await toast(`✅ [${limiter.name}] key…${acq.tail} 第 ${attempt + 1} 次成功`, 'success')
       }
-      return wrapResponseForSlot(res, () => limiter.releaseSlot())
+      return wrapResponseForSlot(res, () => limiter.releaseSlot(), init?.signal)
     }
 
     // 所有 key 都 429，把最后的 429 响应还回去，让 opencode 自己的重试来扛
@@ -240,8 +236,8 @@ export function wrapFetch(
   return wrapped
 }
 
-/** 流式响应期间保持并发位不释放；读尽/关闭时归还 */
-function wrapResponseForSlot(res: Response, release: () => void): Response {
+/** 流式响应期间保持并发位不释放；读尽/关闭/请求被 abort 时归还 */
+function wrapResponseForSlot(res: Response, release: () => void, signal?: AbortSignal | null): Response {
   if (!res.body) {
     release()
     return res
@@ -249,6 +245,18 @@ function wrapResponseForSlot(res: Response, release: () => void): Response {
   const { readable, writable } = new TransformStream()
   const reader = res.body.getReader()
   const writer = writable.getWriter()
+  // 调用方中断请求（如用户在 opencode 里打断生成）→ 立刻取消底层 reader，
+  // 否则泵循环悬挂在 read() 上，并发槽永远不释放
+  // 注意：泵循环可能卡在 writer.write()（没人消费 body 时 HWM 背压），
+  // 只 cancel reader 解不开这个 await，必须同时 abort writer 让挂起的 write 立即 reject
+  const onAbort = () => {
+    reader.cancel().catch(() => {})
+    writer.abort(new Error('request aborted')).catch(() => {})
+  }
+  if (signal) {
+    if (signal.aborted) onAbort()
+    else signal.addEventListener('abort', onAbort, { once: true })
+  }
   ;(async () => {
     try {
       while (true) {
@@ -260,6 +268,7 @@ function wrapResponseForSlot(res: Response, release: () => void): Response {
     } catch (e) {
       try { writer.abort(e) } catch {}
     } finally {
+      signal?.removeEventListener('abort', onAbort)
       release()
     }
   })()

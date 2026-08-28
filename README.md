@@ -2,7 +2,7 @@
 
 [English](README_EN.md)
 
-OpenCode 插件：给 AI 请求做**令牌桶限流**——滑动窗口限制每分钟请求数，避免触发 RPM 上限导致的 429；多 key 场景自动轮询分流，抬升整体吞吐，缩短首 token 时间。
+OpenCode 插件：给 AI 请求做**滑动窗口限流**——按每分钟请求数精确控速，避免触发 RPM 上限导致的 429；多 key 场景自动轮询分流，抬升整体吞吐，缩短首 token 时间。
 
 ## 功能
 
@@ -79,19 +79,15 @@ npm 包名写进 `~/.config/opencode/opencode.jsonc`（或 `.json`）的 `plugin
     "google": { "rpm": 60 }
   },
   
-  // 429 后冷却不重试（冷却期间跳过该 key）
+  // 429 后该 key 进入冷却（冷却期间跳过）；无 Retry-After 头时从 baseDelayMs 指数翻倍
   "backoff": {
-    "enabled": true,
-    "maxRetries": 3,
     "baseDelayMs": 5000,
-    "maxDelayMs": 120000,
-    "jitterFactor": 0.2
+    "maxDelayMs": 120000
   },
   
-  // 会话日志
+  // 日志文件开关（~/.config/opencode/opencode-poorguy-ratelimit.log）
   "logging": {
-    "enabled": true,
-    "level": "info"                    // debug | info | warn | error
+    "enabled": true
   }
 }
 ```
@@ -106,12 +102,9 @@ npm 包名写进 `~/.config/opencode/opencode.jsonc`（或 `.json`）的 `plugin
 | `providers.<name>.rpm` | number | `40` | 每把 key 每分钟允许请求数；总吞吐 = `rpm × key 数量` |
 | `providers.<name>.keys` | string[] | 无 | 可选。配置了就在这几把之间轮换；未配置则自动读取 `opencode.json` 中该 provider 的 `options.apiKey`（**不需要在插件配置里重复写 key**） |
 | `providers.<name>.maxConcurrent` | number | `2` | 同一时刻允许最多几个**并发请求**。超出的请求排队等前面的请求（包括流式接收完成）再发，防止 NIM 因并发触发 429 |
-| `backoff.enabled` | boolean | `true` | 429 时是否对该 key 做指数冷却 |
-| `backoff.baseDelayMs` | number | `5000` | 首次 429 的基础冷却毫秒数 |
-| `backoff.maxDelayMs` | number | `120000` | 冷却上限 |
-| `backoff.jitterFactor` | number | `0.2` | 随机抖动系数，防多个冷却同时醒来 |
-| `logging.enabled` | boolean | `true` | 是否写插件日志 |
-| `logging.level` | string | `"info"` | 日志级别（debug/info/warn/error） |
+| `backoff.baseDelayMs` | number | `5000` | 429 后首次冷却毫秒数（无 `Retry-After` 头时）；连续 429 指数翻倍 |
+| `backoff.maxDelayMs` | number | `120000` | 冷却上限（实际会被压到 61s 限流窗口以内） |
+| `logging.enabled` | boolean | `true` | 是否写插件日志文件 |
 
 > provider 名字必须是 `opencode.json` 里 `provider` 对象的**键名**（key），不是显示名。
 

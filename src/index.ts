@@ -1,19 +1,24 @@
 import type { Plugin } from "@opencode-ai/plugin"
 import { loadConfig } from './config'
 import { ProviderLimiter, wrapFetch } from './fetch-interceptor'
-import { fileLog, LOG_FILE } from './logger'
+import { fileLog, LOG_FILE, setLogEnabled } from './logger'
+
+/** NIM 按分钟限流，窗口给 1s 余量；冷却也不超过这个值，避免错过窗口重置 */
+const NIM_WINDOW_MS = 61_000
 
 export const PoorguyRatelimit: Plugin = async ({ client }) => {
   const config = await loadConfig()
   if (!config.enabled) return {}
 
+  setLogEnabled(config.logging.enabled)
+
   const limiters = new Map<string, ProviderLimiter>()
   for (const [name, p] of Object.entries(config.providers)) {
     const keys = (p.keys as any[]).map(k => typeof k === 'string' ? { key: k } : k)
     limiters.set(name, new ProviderLimiter(name, keys, p.rpm ?? 40, {
-      windowMs: 60000,
+      windowMs: NIM_WINDOW_MS,
       baseCooldownMs: config.backoff.baseDelayMs,
-      maxCooldownMs: Math.min(config.backoff.maxDelayMs, 61000),
+      maxCooldownMs: Math.min(config.backoff.maxDelayMs, NIM_WINDOW_MS),
       maxConcurrent: p.maxConcurrent ?? 2,
       strategy: config.strategy,
       onWait: (ms) => {
@@ -37,7 +42,7 @@ export const PoorguyRatelimit: Plugin = async ({ client }) => {
         }
         providerCfg.options = providerCfg.options ?? {}
         const prev: typeof globalThis.fetch = providerCfg.options.fetch ?? globalThis.fetch
-        providerCfg.options.fetch = wrapFetch(prev, limiter, toast, config.logging.enabled)
+        providerCfg.options.fetch = wrapFetch(prev, limiter, toast)
         fileLog('info', `fetch wrapped for provider=${name}`)
       }
     }

@@ -22,23 +22,14 @@
     }
   },
 
-  // 429错误处理（指数退避）
+  // 429 冷却：无 Retry-After 头时从 baseDelayMs 指数翻倍，封顶 maxDelayMs
   "backoff": {
-    "enabled": true,
-    "maxRetries": 3,
     "baseDelayMs": 5000,
-    "maxDelayMs": 120000,
-    "jitterFactor": 0.2
+    "maxDelayMs": 120000
   },
 
-  // 日志配置
+  // 日志配置（写 ~/.config/opencode/opencode-poorguy-ratelimit.log）
   "logging": {
-    "enabled": true,
-    "level": "info"
-  },
-
-  // 统计配置
-  "stats": {
     "enabled": true
   }
 }
