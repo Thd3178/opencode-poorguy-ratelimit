@@ -12,7 +12,8 @@ export const PoorguyRatelimit: Plugin = async ({ client }) => {
     const keys = (p.keys as any[]).map(k => typeof k === 'string' ? { key: k } : k)
     limiters.set(name, new ProviderLimiter(name, keys, p.rpm ?? 40, {
       windowMs: 60000,
-      backoff: config.backoff,
+      baseCooldownMs: config.backoff.baseDelayMs,
+      maxCooldownMs: Math.min(config.backoff.maxDelayMs, 61000),
       strategy: config.strategy,
       onWait: (ms) => {
         toast(`⏳ [${name}] 触发限流，等待 ${(ms / 1000).toFixed(1)}s（${limiters.get(name)?.remaining() ?? 0} 剩余额度）`, 'warning')

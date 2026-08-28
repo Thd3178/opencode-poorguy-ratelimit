@@ -1,9 +1,8 @@
 import { ProviderLimiter } from './fetch-interceptor'
 import { BackoffConfig } from './types'
 
-const BACKOFF: BackoffConfig = { enabled: true, maxRetries: 5, baseDelayMs: 100, maxDelayMs: 1000, jitterFactor: 0 }
 const mkOpts = (strategy: 'round-robin' | 'least-used' | 'random', windowMs: number) => ({
-  windowMs, backoff: BACKOFF, strategy,
+  windowMs, baseCooldownMs: 100, maxCooldownMs: 1000, strategy,
 })
 
 function assert(cond: boolean, msg: string) {
