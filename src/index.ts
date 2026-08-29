@@ -18,7 +18,9 @@ export const PoorguyRatelimit: Plugin = async ({ client }) => {
     limiters.set(name, new ProviderLimiter(name, keys, p.rpm ?? 40, {
       windowMs: NIM_WINDOW_MS,
       baseCooldownMs: config.backoff.baseDelayMs,
-      maxCooldownMs: Math.min(config.backoff.maxDelayMs, NIM_WINDOW_MS),
+      // 不封顶到限流窗口：服务器通过 Retry-After 声明的等待必须完整生效，
+      // 否则冷却提前结束只会再撞一次 429，陷入连败循环
+      maxCooldownMs: config.backoff.maxDelayMs,
       maxConcurrent: p.maxConcurrent ?? 2,
       strategy: config.strategy,
       onWait: (ms) => {

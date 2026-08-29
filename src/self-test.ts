@@ -43,7 +43,7 @@ async function testMultiKeyCapacity() {
 async function testCooldownSkipsKey() {
   const lim = new ProviderLimiter('t', [{ key: 'AAAAAAAAAAAA1111' }, { key: 'BBBBBBBBBBBB2222' }], 100, mkOpts('round-robin', 5000))
   const a = await lim.acquire()           // key A
-  lim.mark429(a.tail)                      // 冷却 A（≈100ms）
+  lim.mark429(a.keyIndex)                  // 冷却 A（≈100ms）
   const next = await lim.acquire()
   assert(next.tail !== a.tail, `cooldown: 429 后应避开冷却 key，换用另一把（用了 ${next.tail}）`)
 }
@@ -52,7 +52,7 @@ async function testSingleKeyAllWait() {
   // 单 key + 429 冷却：所有请求都应等待 cooldown 结束
   const lim = new ProviderLimiter('t', [{ key: 'AAAAAAAAAAAA1111' }], 100, mkOpts('round-robin', 5000))
   const a = await lim.acquire()
-  lim.mark429(a.tail)                       // 冷却唯一 key ≈100ms
+  lim.mark429(a.keyIndex)                   // 冷却唯一 key ≈100ms
   const t0 = Date.now()
   const next = await lim.acquire()
   const took = Date.now() - t0
@@ -101,6 +101,14 @@ async function testConcurrencyGate() {
     `并发闸门 maxConcurrent=1 串行化：b 在 a 完成后才开始（order=${idx}）`)
 }
 
+async function testRetryAfterNotTruncated() {
+  const lim = new ProviderLimiter('t', [{ key: 'AAAAAAAAAAAA1111' }], 100, mkOpts('round-robin', 5000))
+  const a = await lim.acquire()
+  // maxCooldownMs=1000，但服务器 Retry-After: 3（=3000ms）必须原样采用，不得截断
+  const cd = lim.mark429(a.keyIndex, new Headers({ 'retry-after': '3' }))
+  assert(cd === 3000, `retry-after: 服务器说的 3000ms 不被本地 1000ms 上限截断（实际 ${cd}ms）`)
+}
+
 async function main() {
   await testRoundRobin()
   await testWindowThrottle()
@@ -108,6 +116,7 @@ async function main() {
   await testCooldownSkipsKey()
   await testSingleKeyAllWait()
   await testConcurrencyGate()
+  await testRetryAfterNotTruncated()
   console.log('done.')
 }
 

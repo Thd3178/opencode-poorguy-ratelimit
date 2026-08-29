@@ -103,7 +103,7 @@ npm 包名写进 `~/.config/opencode/opencode.jsonc`（或 `.json`）的 `plugin
 | `providers.<name>.keys` | string[] | 无 | 可选。配置了就在这几把之间轮换；未配置则自动读取 `opencode.json` 中该 provider 的 `options.apiKey`（**不需要在插件配置里重复写 key**） |
 | `providers.<name>.maxConcurrent` | number | `2` | 同一时刻允许最多几个**并发请求**。超出的请求排队等前面的请求（包括流式接收完成）再发，防止 NIM 因并发触发 429 |
 | `backoff.baseDelayMs` | number | `5000` | 429 后首次冷却毫秒数（无 `Retry-After` 头时）；连续 429 指数翻倍 |
-| `backoff.maxDelayMs` | number | `120000` | 冷却上限（实际会被压到 61s 限流窗口以内） |
+| `backoff.maxDelayMs` | number | `120000` | 本地指数退避的冷却上限；服务器返回的 `Retry-After` 不受此值截断，原样生效 |
 | `logging.enabled` | boolean | `true` | 是否写插件日志文件 |
 
 > provider 名字必须是 `opencode.json` 里 `provider` 对象的**键名**（key），不是显示名。

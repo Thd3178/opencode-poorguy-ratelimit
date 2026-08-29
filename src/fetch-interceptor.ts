@@ -76,29 +76,37 @@ export class ProviderLimiter {
     throw new Error(`[poorguy-ratelimit] ${this.name}: acquire failed after 120 rounds`)
   }
 
-  /** NIM 429 处理：优先用 Retry-After 头，否则指数退避（封顶 maxCooldownMs） */
-  mark429(tail: string, responseHeaders?: Headers): number {
-    const k = this.keys.find(x => x.name === tail)
+  /**
+   * NIM 429 处理：优先用 Retry-After 头（原样采用，不截断——服务器最了解自己的惩罚期），
+   * 否则指数退避（封顶 maxCooldownMs）。配额耗尽型 429 走长冷却。
+   */
+  mark429(keyIndex: number, responseHeaders?: Headers, isQuotaExhausted = false): number {
+    const k = this.keys[keyIndex]
     if (!k) return 0
 
     const now = Date.now()
-    const ram = responseHeaders?.get('retry-after-ms')
-    const ra = responseHeaders?.get('retry-after')
-    const fromHeader = ram ? parseFloat(ram) : ra ? parseFloat(ra) * 1000 : undefined
-
-    const cooldownMs = Number.isFinite(fromHeader)
-      ? Math.min(fromHeader!, this.opts.maxCooldownMs)
-      : Math.min(this.opts.baseCooldownMs * Math.pow(2, k.error429Count), this.opts.maxCooldownMs)
+    let cooldownMs: number
+    if (isQuotaExhausted) {
+      // 配额耗尽（日/月额度）：退避没意义，冷却半个时限等级的时长
+      cooldownMs = 30 * 60 * 1000
+    } else {
+      const ram = responseHeaders?.get('retry-after-ms')
+      const ra = responseHeaders?.get('retry-after')
+      const fromHeader = ram ? parseFloat(ram) : ra ? parseFloat(ra) * 1000 : undefined
+      cooldownMs = Number.isFinite(fromHeader)
+        ? fromHeader!
+        : Math.min(this.opts.baseCooldownMs * Math.pow(2, k.error429Count), this.opts.maxCooldownMs)
+    }
 
     k.error429Count++
     k.cooldownUntil = now + cooldownMs
-    fileLog('warn', `[${this.name}] 429 @key…${k.name} -> cooldown ${cooldownMs}ms (本 key 连败 ${k.error429Count})`)
+    fileLog('warn', `[${this.name}] 429 @key…${k.name} -> cooldown ${cooldownMs}ms (本 key 连败 ${k.error429Count}${isQuotaExhausted ? '，配额耗尽' : ''})`)
     return cooldownMs
   }
 
   /** 请求成功 → 清零错误计数，熔断恢复 */
-  noteSuccess(tail: string): void {
-    const k = this.keys.find(x => x.name === tail)
+  noteSuccess(keyIndex: number): void {
+    const k = this.keys[keyIndex]
     if (k) { k.error429Count = 0; k.lastSuccessAt = Date.now() }
   }
 
@@ -185,19 +193,38 @@ export class ProviderLimiter {
   }
 }
 
+const WRAPPED_MARK = Symbol.for('poorguy-ratelimit.wrapped')
+
+/** 429 body 里的配额耗尽特征（区别于普通 RPM 限流） */
+const QUOTA_RE = /quota|insufficient.{0,20}(quota|credit|balance)|daily|day limit|monthly|per\s*day|exceed.{0,20}(quota|allowance)/i
+
+async function detectQuotaExhausted(res: Response): Promise<boolean> {
+  try {
+    const text = await res.clone().text()
+    return QUOTA_RE.test(text)
+  } catch {
+    return false
+  }
+}
+
 /** 包一层 fetch：限流→轮换 Authorization→429 时本地轮询换 key 重试（不交给 opencode） */
 export function wrapFetch(
   origFetch: typeof globalThis.fetch,
   limiter: ProviderLimiter,
   toast: ToastFn
 ): typeof globalThis.fetch {
+  // 防重复包裹：config hook 若被多次调用，套娃会导致额度按倍数消耗
+  if ((origFetch as any)[WRAPPED_MARK]) return origFetch
+
   const wrapped: typeof globalThis.fetch = async (input: any, init?: any) => {
     const maxAttempts = limiter.totalKeyCount  // 每把 key 试一次，全部失败才还给 opencode
     let lastRes: Response | undefined
 
+    // 先抢并发位再占窗口额度：排队期间不白烧窗口 hit
+    await limiter.acquireSlot()
+
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       const acq = await limiter.acquire()        // 窗口额度
-      await limiter.acquireSlot()                // 并发位
 
       await toast(`🔑 [${limiter.name}] key…${acq.tail} · 窗口 ${acq.windowUsed}/${limiter.rpm} · key ${acq.keyIndex + 1}/${acq.totalKeys}`, 'info')
 
@@ -215,24 +242,27 @@ export function wrapFetch(
       fileLog('info', `[${limiter.name}] key=…${acq.tail} wait=${acq.waitedMs}ms attempt=${attempt + 1}/${maxAttempts} -> ${res.status}`)
 
       if (res.status === 429) {
-        limiter.releaseSlot()
-        const cd = limiter.mark429(acq.tail, res.headers)
+        const quota = await detectQuotaExhausted(res)
+        const cd = limiter.mark429(acq.keyIndex, res.headers, quota)
         lastRes = res
-        await toast(`🚫 [${limiter.name}] key…${acq.tail} 429，冷却 ${(cd / 1000).toFixed(0)}s${attempt < maxAttempts - 1 ? '，换下一把' : '，key 用尽交 opencode 重试'}`, 'error')
+        // 并发位继续持有，直到拿到非 429 响应或所有 key 用尽
+        if (attempt >= maxAttempts - 1) limiter.releaseSlot()
+        await toast(`🚫 [${limiter.name}] key…${acq.tail} 429${quota ? '（配额耗尽）' : ''}，冷却 ${(cd / 1000).toFixed(0)}s${attempt < maxAttempts - 1 ? '，换下一把' : '，key 用尽交 opencode 重试'}`, 'error')
         continue
       }
 
       // 非 429：成功的请求在流读完/关闭前一直占用并发位
-      limiter.noteSuccess(acq.tail)
+      limiter.noteSuccess(acq.keyIndex)
       if (attempt > 0) {
         await toast(`✅ [${limiter.name}] key…${acq.tail} 第 ${attempt + 1} 次成功`, 'success')
       }
-      return wrapResponseForSlot(res, () => limiter.releaseSlot(), init?.signal)
+      return wrapResponseForSlot(res, () => limiter.releaseSlot(), init?.signal ?? (input instanceof Request ? input.signal : null))
     }
 
     // 所有 key 都 429，把最后的 429 响应还回去，让 opencode 自己的重试来扛
     return lastRes!
   }
+  ;(wrapped as any)[WRAPPED_MARK] = true
   return wrapped
 }
 
